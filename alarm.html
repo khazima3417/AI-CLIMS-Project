@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alarm Clock</title>
+<style>
+  html, body { margin:0; padding:0; min-height:100vh; background:#060a07;
+    display:flex; align-items:center; justify-content:center; }
+  #root { width:100%; max-width:420px; padding:24px 12px; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18",
+    "react-dom/client": "https://esm.sh/react-dom@18/client",
+    "lucide-react": "https://esm.sh/lucide-react@0.383.0?external=react"
+  }
+}
+</script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+</head>
+<body>
+<a href="index.html" style="position:fixed;top:12px;left:12px;z-index:9999;background:rgba(255,255,255,0.08);color:#fff;text-decoration:none;font-family:sans-serif;font-size:13px;padding:7px 12px;border-radius:20px;border:1px solid rgba(255,255,255,0.25);">← Home</a>
+<div id="root"></div>
+<script type="text/babel" data-type="module" data-presets="react">
+import React, { useState, useEffect, useRef, useMemo } from "react";
+import { createRoot } from "react-dom/client";
+import { Bell, BellRing, Plus, X, Trash2, Sun, Moon, Sunrise, Sunset, Volume2, VolumeX } from "lucide-react";
+
+const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
+
+const COLORS = {
+  bg: "#0F1B14",
+  bgCard: "#16261C",
+  bgCardAlt: "#1C2F22",
+  border: "#2A4335",
+  textPrimary: "#F0F4E8",
+  textSecondary: "#8FA88C",
+  textDim: "#5C7259",
+  accent: "#7BA05B",
+  accentSoft: "#C9DDA0",
+  danger: "#C97B5E",
+};
+
+function pad2(n) {
+  return n.toString().padStart(2, "0");
+}
+
+function to24Hour(hour12, minute, period) {
+  let h = hour12 % 12;
+  if (period === "PM") h += 12;
+  return h * 60 + minute;
+}
+
+function formatAlarmTime(hour12, minute, period) {
+  return `${hour12}:${pad2(minute)} ${period}`;
+}
+
+function horizonForMinutes(totalMinutes) {
+  const h = Math.floor(totalMinutes / 60);
+  if (h >= 5 && h < 7) {
+    return { gradient: `linear-gradient(90deg, #2A4335, ${COLORS.accent})`, icon: Sunrise, label: "Dawn" };
+  }
+  if (h >= 7 && h < 17) {
+    return { gradient: `linear-gradient(90deg, ${COLORS.accentSoft}, ${COLORS.accent})`, icon: Sun, label: "Day" };
+  }
+  if (h >= 17 && h < 20) {
+    return { gradient: `linear-gradient(90deg, ${COLORS.accent}, #4A6B4E)`, icon: Sunset, label: "Dusk" };
+  }
+  return { gradient: `linear-gradient(90deg, #0F1B14, #2A4335)`, icon: Moon, label: "Night" };
+}
+
+function DayPicker({ selected, onToggle }) {
+  return (
+    <div style={{ display: "flex", gap: 8, justifyContent: "space-between" }}>
+      {DAY_LABELS.map((label, i) => {
+        const on = selected[i];
+        return (
+          <button
+            key={i}
+            onClick={() => onToggle(i)}
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: "50%",
+              border: `1px solid ${on ? COLORS.accent : COLORS.border}`,
+              background: on ? COLORS.accent : "transparent",
+              color: on ? "#0F1B14" : COLORS.textSecondary,
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all 0.15s ease",
+              flexShrink: 0,
+            }}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function AlarmCard({ alarm, onToggle, onDelete }) {
+  const totalMinutes = to24Hour(alarm.hour, alarm.minute, alarm.period);
+  const { gradient, icon: Icon } = horizonForMinutes(totalMinutes);
+  const dotPct = (totalMinutes / 1440) * 100;
+  const activeDayCount = alarm.days.filter(Boolean).length;
+  const daysText =
+    activeDayCount === 0
+      ? "Once"
+      : activeDayCount === 7
+      ? "Every day"
+      : DAY_LABELS.map((d, i) => (alarm.days[i] ? d : "·")).join(" ");
+
+  return (
+    <div
+      style={{
+        background: COLORS.bgCard,
+        border: `1px solid ${COLORS.border}`,
+        borderRadius: 16,
+        padding: "14px 16px",
+        opacity: alarm.enabled ? 1 : 0.45,
+        transition: "opacity 0.2s ease",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div
+            style={{
+              fontFamily: "'Space Grotesk', sans-serif",
+              fontSize: 30,
+              fontWeight: 600,
+              color: COLORS.textPrimary,
+              lineHeight: 1.1,
+              letterSpacing: "-0.5px",
+            }}
+          >
+            {formatAlarmTime(alarm.hour, alarm.minute, alarm.period)}
+          </div>
+          <div style={{ fontSize: 13, color: COLORS.textSecondary, marginTop: 2 }}>
+            {alarm.label || "Alarm"}
+          </div>
+        </div>
+
+        <button
+          onClick={() => onToggle(alarm.id)}
+          aria-label="Toggle alarm"
+          style={{
+            width: 46,
+            height: 26,
+            borderRadius: 13,
+            border: "none",
+            background: alarm.enabled ? COLORS.accent : COLORS.bgCardAlt,
+            position: "relative",
+            cursor: "pointer",
+            padding: 0,
+            transition: "background 0.2s ease",
+            flexShrink: 0,
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              top: 3,
+              left: alarm.enabled ? 23 : 3,
+              width: 20,
+              height: 20,
+              borderRadius: "50%",
+              background: alarm.enabled ? "#0F1B14" : COLORS.textDim,
+              transition: "left 0.2s ease",
+            }}
+          />
+        </button>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+        <div style={{ position: "relative", flex: 1, height: 4, borderRadius: 2, background: gradient }}>
+          <div
+            style={{
+              position: "absolute",
+              top: -4,
+              left: `calc(${dotPct}% - 6px)`,
+              width: 12,
+              height: 12,
+              borderRadius: "50%",
+              background: COLORS.textPrimary,
+              border: `2px solid ${COLORS.bgCard}`,
+            }}
+          />
+        </div>
+        <Icon size={14} color={COLORS.textSecondary} />
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginTop: 10,
+        }}
+      >
+        <span
+          style={{
+            fontFamily: "'IBM Plex Mono', monospace",
+            fontSize: 11,
+            letterSpacing: 1,
+            color: COLORS.textDim,
+            textTransform: "uppercase",
+          }}
+        >
+          {daysText}
+        </span>
+        <button
+          onClick={() => onDelete(alarm.id)}
+          aria-label="Delete alarm"
+          style={{
+            background: "none",
+            border: "none",
+            color: COLORS.textDim,
+            cursor: "pointer",
+            padding: 4,
+            display: "flex",
+          }}
+        >
+          <Trash2 size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AddAlarmSheet({ onSave, onCancel }) {
+  const [hour, setHour] = useState(7);
+  const [minute, setMinute] = useState(0);
+  const [period, setPeriod] = useState("AM");
+  const [label, setLabel] = useState("");
+  const [days, setDays] = useState(Array(7).fill(false));
+
+  const toggleDay = (i) => {
+    setDays((d) => d.map((v, idx) => (idx === i ? !v : v)));
+  };
+
+  const selectStyle = {
+    background: COLORS.bgCardAlt,
+    color: COLORS.textPrimary,
+    border: `1px solid ${COLORS.border}`,
+    borderRadius: 10,
+    padding: "10px 8px",
+    fontFamily: "'Space Grotesk', sans-serif",
+    fontSize: 20,
+    fontWeight: 600,
+    textAlign: "center",
+    appearance: "none",
+    WebkitAppearance: "none",
+    outline: "none",
+  };
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: "rgba(6, 12, 8, 0.72)",
+        display: "flex",
+        alignItems: "flex-end",
+        zIndex: 20,
+      }}
+      onClick={onCancel}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          background: COLORS.bg,
+          borderTop: `1px solid ${COLORS.border}`,
+          borderRadius: "20px 20px 0 0",
+          padding: "20px 20px 28px",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+          <span style={{ fontSize: 16, fontWeight: 600, color: COLORS.textPrimary }}>New alarm</span>
+          <button
+            onClick={onCancel}
+            style={{ background: "none", border: "none", color: COLORS.textSecondary, cursor: "pointer" }}
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "center", marginBottom: 20 }}>
+          <select value={hour} onChange={(e) => setHour(Number(e.target.value))} style={{ ...selectStyle, width: 64 }}>
+            {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
+              <option key={h} value={h}>
+                {h}
+              </option>
+            ))}
+          </select>
+          <span style={{ fontSize: 24, color: COLORS.textDim, alignSelf: "center" }}>:</span>
+          <select value={minute} onChange={(e) => setMinute(Number(e.target.value))} style={{ ...selectStyle, width: 64 }}>
+            {Array.from({ length: 60 }, (_, i) => i).map((m) => (
+              <option key={m} value={m}>
+                {pad2(m)}
+              </option>
+            ))}
+          </select>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginLeft: 4 }}>
+            {["AM", "PM"].map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                style={{
+                  border: `1px solid ${period === p ? COLORS.accent : COLORS.border}`,
+                  background: period === p ? COLORS.accent : "transparent",
+                  color: period === p ? "#0F1B14" : COLORS.textSecondary,
+                  borderRadius: 8,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: "4px 10px",
+                  cursor: "pointer",
+                }}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <input
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Label (optional)"
+          style={{
+            width: "100%",
+            boxSizing: "border-box",
+            background: COLORS.bgCardAlt,
+            border: `1px solid ${COLORS.border}`,
+            borderRadius: 10,
+            padding: "11px 14px",
+            color: COLORS.textPrimary,
+            fontSize: 14,
+            marginBottom: 18,
+            outline: "none",
+          }}
+        />
+
+        <div style={{ fontSize: 11, letterSpacing: 1, color: COLORS.textDim, marginBottom: 10, textTransform: "uppercase" }}>
+          Repeat
+        </div>
+        <DayPicker selected={days} onToggle={toggleDay} />
+
+        <button
+          onClick={() => onSave({ hour, minute, period, label, days, enabled: true, id: Date.now() })}
+          style={{
+            width: "100%",
+            marginTop: 24,
+            background: COLORS.accent,
+            border: "none",
+            borderRadius: 12,
+            padding: "13px 0",
+            color: "#0F1B14",
+            fontSize: 15,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          Save alarm
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RingingOverlay({ alarm, onDismiss, onSnooze, soundOn, onToggleSound }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: COLORS.bg,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 30,
+        gap: 8,
+      }}
+    >
+      <button
+        onClick={onToggleSound}
+        aria-label={soundOn ? "Mute alarm" : "Unmute alarm"}
+        style={{
+          position: "absolute",
+          top: 18,
+          right: 18,
+          background: COLORS.bgCard,
+          border: `1px solid ${COLORS.border}`,
+          borderRadius: "50%",
+          width: 38,
+          height: 38,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+        }}
+      >
+        {soundOn ? <Volume2 size={17} color={COLORS.textSecondary} /> : <VolumeX size={17} color={COLORS.textSecondary} />}
+      </button>
+      <div
+        style={{
+          width: 90,
+          height: 90,
+          borderRadius: "50%",
+          background: COLORS.bgCard,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          marginBottom: 8,
+          animation: "pulseRing 1.1s ease-in-out infinite",
+        }}
+      >
+        <BellRing size={38} color={COLORS.accent} />
+      </div>
+      <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 44, fontWeight: 600, color: COLORS.textPrimary }}>
+        {formatAlarmTime(alarm.hour, alarm.minute, alarm.period)}
+      </div>
+      <div style={{ fontSize: 15, color: COLORS.textSecondary, marginBottom: 30 }}>{alarm.label || "Alarm"}</div>
+      <div style={{ display: "flex", gap: 14, width: "80%" }}>
+        <button
+          onClick={onSnooze}
+          style={{
+            flex: 1,
+            padding: "14px 0",
+            borderRadius: 12,
+            border: `1px solid ${COLORS.border}`,
+            background: COLORS.bgCardAlt,
+            color: COLORS.textPrimary,
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          Snooze 9m
+        </button>
+        <button
+          onClick={onDismiss}
+          style={{
+            flex: 1,
+            padding: "14px 0",
+            borderRadius: 12,
+            border: "none",
+            background: COLORS.accent,
+            color: "#0F1B14",
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function AlarmClockApp() {
+  const [now, setNow] = useState(new Date());
+  const [alarms, setAlarms] = useState([
+    { id: 1, hour: 6, minute: 30, period: "AM", label: "Morning run", days: [false, true, true, true, true, true, false], enabled: true },
+    { id: 2, hour: 8, minute: 0, period: "AM", label: "Weekday wake up", days: [false, true, true, true, true, true, false], enabled: true },
+    { id: 3, hour: 9, minute: 15, period: "AM", label: "Weekend lie-in", days: [true, false, false, false, false, false, true], enabled: false },
+  ]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [ringingAlarm, setRingingAlarm] = useState(null);
+  const [snoozeToast, setSnoozeToast] = useState(false);
+  const [soundOn, setSoundOn] = useState(true);
+  const dismissedThisMinute = useRef(new Set());
+  const audioCtxRef = useRef(null);
+  const beepTimerRef = useRef(null);
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const ensureAudioContext = () => {
+    if (!audioCtxRef.current) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) audioCtxRef.current = new Ctx();
+    }
+    if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
+      audioCtxRef.current.resume();
+    }
+  };
+
+  // --- Soft, gentle beep ---
+  // Lower frequencies, slower fade-in/out, and quieter volume than a sharp alarm beep,
+  // so it sounds calm rather than jarring.
+  const playBeep = (freq) => {
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    const t0 = ctx.currentTime;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.15);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.6);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.65);
+  };
+
+  const startAlarmSound = () => {
+    ensureAudioContext();
+    stopAlarmSound();
+    let toggle = false;
+    beepTimerRef.current = setInterval(() => {
+      if (soundOn) playBeep(toggle ? 523 : 440); // gentle C5 / A4 chime
+      toggle = !toggle;
+    }, 900);
+  };
+
+  const stopAlarmSound = () => {
+    if (beepTimerRef.current) {
+      clearInterval(beepTimerRef.current);
+      beepTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (ringingAlarm) {
+      startAlarmSound();
+    } else {
+      stopAlarmSound();
+    }
+    return () => stopAlarmSound();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ringingAlarm, soundOn]);
+
+  useEffect(() => {
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    if (now.getSeconds() !== 0) return;
+    dismissedThisMinute.current = new Set();
+    const match = alarms.find((a) => {
+      if (!a.enabled) return false;
+      return to24Hour(a.hour, a.minute, a.period) === nowMinutes;
+    });
+    if (match && !dismissedThisMinute.current.has(match.id)) {
+      setRingingAlarm(match);
+    }
+  }, [now, alarms]);
+
+  const toggleAlarm = (id) => {
+    setAlarms((prev) => prev.map((a) => (a.id === id ? { ...a, enabled: !a.enabled } : a)));
+  };
+
+  const deleteAlarm = (id) => {
+    setAlarms((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const addAlarm = (alarm) => {
+    setAlarms((prev) => [...prev, alarm].sort((a, b) => to24Hour(a.hour, a.minute, a.period) - to24Hour(b.hour, b.minute, b.period)));
+    setShowAdd(false);
+  };
+
+  const dismissRinging = () => {
+    if (ringingAlarm) dismissedThisMinute.current.add(ringingAlarm.id);
+    setRingingAlarm(null);
+  };
+
+  const snoozeRinging = () => {
+    if (ringingAlarm) dismissedThisMinute.current.add(ringingAlarm.id);
+    setRingingAlarm(null);
+    setSnoozeToast(true);
+    setTimeout(() => setSnoozeToast(false), 2000);
+  };
+
+  const currentMinutesOfDay = now.getHours() * 60 + now.getMinutes();
+  const nowPct = (currentMinutesOfDay / 1440) * 100;
+  const { icon: NowIcon } = horizonForMinutes(currentMinutesOfDay);
+
+  const timeStr = useMemo(() => {
+    let h = now.getHours() % 12;
+    if (h === 0) h = 12;
+    return `${h}:${pad2(now.getMinutes())}`;
+  }, [now]);
+  const periodStr = now.getHours() >= 12 ? "PM" : "AM";
+  const dateStr = now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+
+  const enabledCount = alarms.filter((a) => a.enabled).length;
+
+  return (
+    <div
+      onClick={ensureAudioContext}
+      style={{
+        width: "100%",
+        maxWidth: 380,
+        margin: "0 auto",
+        background: COLORS.bg,
+        borderRadius: 28,
+        overflow: "hidden",
+        position: "relative",
+        fontFamily: "'Inter', -apple-system, sans-serif",
+        boxShadow: "0 20px 60px rgba(12, 7, 40, 0.5)",
+      }}
+    >
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+        @keyframes pulseRing {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.08); }
+        }
+        select option { background: ${COLORS.bgCardAlt}; }
+      `}</style>
+
+      <div style={{ padding: "28px 20px 20px" }}>
+        <div style={{ textAlign: "center", marginBottom: 18 }}>
+          <div style={{ fontSize: 12, letterSpacing: 2, color: COLORS.textDim, textTransform: "uppercase", marginBottom: 6 }}>
+            {dateStr}
+          </div>
+          <div
+            style={{
+              fontFamily: "'Space Grotesk', sans-serif",
+              fontSize: 64,
+              fontWeight: 600,
+              color: COLORS.textPrimary,
+              letterSpacing: "-2px",
+              lineHeight: 1,
+            }}
+          >
+            {timeStr}
+            <span style={{ fontSize: 22, color: COLORS.textSecondary, marginLeft: 8, fontWeight: 500 }}>{periodStr}</span>
+          </div>
+        </div>
+
+        <div style={{ position: "relative", height: 6, borderRadius: 3, background: "linear-gradient(90deg, #0F1B14 0%, #2A4335 20%, #7BA05B 27%, #C9DDA0 45%, #7BA05B 65%, #4A6B4E 80%, #0F1B14 100%)", marginBottom: 6 }}>
+          {alarms
+            .filter((a) => a.enabled)
+            .map((a) => {
+              const pct = (to24Hour(a.hour, a.minute, a.period) / 1440) * 100;
+              return (
+                <div
+                  key={a.id}
+                  title={formatAlarmTime(a.hour, a.minute, a.period)}
+                  style={{
+                    position: "absolute",
+                    top: -3,
+                    left: `calc(${pct}% - 3px)`,
+                    width: 6,
+                    height: 12,
+                    borderRadius: 2,
+                    background: COLORS.textPrimary,
+                    opacity: 0.85,
+                  }}
+                />
+              );
+            })}
+          <div
+            style={{
+              position: "absolute",
+              top: -6,
+              left: `calc(${nowPct}% - 9px)`,
+              width: 18,
+              height: 18,
+              borderRadius: "50%",
+              background: COLORS.bg,
+              border: `2px solid ${COLORS.textPrimary}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <NowIcon size={10} color={COLORS.textPrimary} />
+          </div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: COLORS.textDim, marginBottom: 22 }}>
+          <span>12 AM</span>
+          <span>12 PM</span>
+          <span>12 AM</span>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: COLORS.textPrimary }}>Alarms</span>
+          <span style={{ fontSize: 12, color: COLORS.textDim }}>
+            {enabledCount} active
+          </span>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 340, overflowY: "auto", paddingBottom: 4 }}>
+          {alarms.length === 0 && (
+            <div style={{ textAlign: "center", padding: "32px 0", color: COLORS.textDim, fontSize: 13 }}>
+              No alarms yet. Tap + to add one.
+            </div>
+          )}
+          {alarms.map((alarm) => (
+            <AlarmCard key={alarm.id} alarm={alarm} onToggle={toggleAlarm} onDelete={deleteAlarm} />
+          ))}
+        </div>
+      </div>
+
+      <button
+        onClick={() => setShowAdd(true)}
+        aria-label="Add alarm"
+        style={{
+          position: "absolute",
+          bottom: 22,
+          right: 22,
+          width: 52,
+          height: 52,
+          borderRadius: "50%",
+          background: COLORS.accent,
+          border: "none",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          boxShadow: "0 8px 20px rgba(9, 11, 157, 0.4)",
+        }}
+      >
+        <Plus size={24} color="#04042c" />
+      </button>
+
+      {snoozeToast && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 84,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: COLORS.bgCardAlt,
+            border: `1px solid ${COLORS.border}`,
+            color: COLORS.textPrimary,
+            padding: "10px 18px",
+            borderRadius: 10,
+            fontSize: 13,
+            zIndex: 25,
+          }}
+        >
+          Snoozed for 9 minutes
+        </div>
+      )}
+
+      {showAdd && <AddAlarmSheet onSave={addAlarm} onCancel={() => setShowAdd(false)} />}
+      {ringingAlarm && (
+        <RingingOverlay
+          alarm={ringingAlarm}
+          onDismiss={dismissRinging}
+          onSnooze={snoozeRinging}
+          soundOn={soundOn}
+          onToggleSound={() => setSoundOn((s) => !s)}
+        />
+      )}
+    </div>
+  );
+}
+createRoot(document.getElementById("root")).render(<AlarmClockApp />);
+</script>
+</body>
+</html>
